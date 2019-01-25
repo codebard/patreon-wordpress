@@ -41,8 +41,10 @@ class Patron_Metabox {
 	}
 
 	function patreon_plugin_meta_box( $object, $box ) { 
+	
+		$current_user = wp_get_current_user();
 			
-		$label    = 'Add a minimum Patreon contribution required to access this content.  (Makes entire post patron only)';
+		$label    = 'Require Patreon pledge of this dollar amount or higher to view this post.  (Makes entire post patron only)  <a href="https://www.patreondevelopers.com/t/patreon-wordpress-locking-options-guide/1135#heading--section-1" target="_blank">(?)</a>';
 		$readonly = '';
 		
 		if ( !get_option( 'patreon-creator-id', false ) ) {
@@ -60,13 +62,24 @@ class Patron_Metabox {
 			<br><br>
 			<strong>&#36; </strong><input type="text" id="patreon-level" name="patreon-level" value="<?php echo get_post_meta( $object->ID, 'patreon-level', true ); ?>" <?php echo $readonly ?>>
 		</p>
-
-		<?php
 		
-		if ( get_option( 'patreon-can-use-api-v2',false ) == 'yes' ) {
+		<?php 
 			
-			$label    = 'Active patrons only (optional) - if on, only patrons active at and before this post\'s publishing date will be able to see this content )';
-			$readonly = '';
+			$advanced_post_options_toggle_status = get_user_meta( $current_user->ID, 'patreon-wordpress-advanced-options-toggle', true );
+						
+			$advanced_post_options_toggle_status_display = 'style=" display: block;" ';
+			
+			if( $advanced_post_options_toggle_status == '' OR $advanced_post_options_toggle_status == 'off' ) {
+				$advanced_post_options_toggle_status_display = 'style=" display: none;" ';
+			}
+		?> 		
+		
+		<div <?php echo $advanced_post_options_toggle_status_display ?>id="patreon-wordpress-advanced-options-toggle">
+		
+			<?php
+			
+			$label    = 'Require an active pledge at the time of this post’s creation to view this post. (optional) <a href="https://www.patreondevelopers.com/t/patreon-wordpress-locking-options-guide/1135#heading--section-2" target="_blank">(?)</a>';
+		$readonly = '';
 			
 			if ( !get_option( 'patreon-creator-id', false ) ) {
 				
@@ -84,8 +97,8 @@ class Patron_Metabox {
 
 			<?php
 			
-			$label    = 'Total patronage (optional) - any patron above total lifetime patronage $ value entered below can see this content';
-			$readonly = '';
+			$label    = 'Require a lifetime pledge amount greater than this amount to view this post. (optional) <a href="https://www.patreondevelopers.com/t/patreon-wordpress-locking-options-guide/1135#heading--section-3" target="_blank">(?)</a>';
+		  $readonly = '';
 			
 			if ( !get_option( 'patreon-creator-id', false ) ) {
 				
@@ -100,10 +113,23 @@ class Patron_Metabox {
 				<br><br>
 				<strong>&#36; </strong><input type="text" id="patreon-total-patronage-level" name="patreon-total-patronage-level" value="<?php echo get_post_meta( $object->ID, 'patreon-total-patronage-level', true ); ?>" <?php echo $readonly ?>>
 			</p>
+		
+		</div>
+		<br />
 
-			<?php
+		
+		<?php 
 			
-		}
+			$advanced_post_options_toggle_text = 'Hide advanced';
+			
+			if( $advanced_post_options_toggle_status == '' OR $advanced_post_options_toggle_status == 'off' ) {
+				$advanced_post_options_toggle_text = 'Show advanced';
+			}
+		?>
+		
+		<a href="" toggle="patreon-wordpress-advanced-options-toggle" togglestatus="<?php echo $advanced_post_options_toggle_status ?>" ontext="Hide advanced" offtext="Show advanced" class="patreon-wordpress-admin-toggle"><?php echo $advanced_post_options_toggle_text ?></a>
+		
+		<?php
 		
 	}
 

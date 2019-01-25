@@ -31,7 +31,8 @@ jQuery( function( $ ) {
 				}
 			});
 		})
-	}, 1000 );		
+	}, 1000 );
+	
 	jQuery( document ).on( 'submit', '#patreon_attachment_patreon_level_form', function( e ) {
 		e.preventDefault();
 		jQuery.ajax({
@@ -45,8 +46,13 @@ jQuery( function( $ ) {
 			}
 		});	
 	});
+	
 	// Need to bind to event after tinymce is initialized - so we hook to all tinymce instances after a timeout
 	setTimeout( function () {
+		
+		if( typeof tinymce === 'undefined' ) {
+			return;
+		}
 		for ( var i = 0; i < tinymce.editors.length; i++ ) {
 			
 			tinymce.editors[i].on( 'click', function ( e ) {
@@ -77,5 +83,52 @@ jQuery( function( $ ) {
 					}
 			});
 		}
-	}, 1000);	
+	}, 1000);
+
+	jQuery(document).on( 'click', '.patreon-wordpress .notice-dismiss', function(e) {
+
+		jQuery.ajax({
+			url: ajaxurl,
+			type:"POST",
+			dataType : 'html',
+			data: {
+				action: 'patreon_wordpress_dismiss_admin_notice',
+				notice_id: jQuery( this ).parent().attr( "id" ),
+			}
+		});
+	});	
+	
+	jQuery(document).on( 'click', '.patreon-wordpress-admin-toggle', function(e) {
+		
+		e.preventDefault();
+		
+		var toggle_id = jQuery( this ).attr( 'toggle' );
+		var toggle_target = document.getElementById( toggle_id );
+
+		jQuery( toggle_target ).slideToggle();
+		
+		if( jQuery( this ).attr( 'togglestatus' ) == 'off' ) {
+			
+			jQuery( this ).html( jQuery( this ).attr( 'ontext' ) );
+			jQuery( this ).attr( 'togglestatus', 'on' );
+			
+		}
+		else if( jQuery( this ).attr( 'togglestatus' ) == 'on' ) {
+			
+			jQuery( this ).html( jQuery( this ).attr( 'offtext' ) );
+			jQuery( this ).attr( 'togglestatus', 'off' );
+			
+		}
+				
+		jQuery.ajax({
+			url: ajaxurl,
+			type:"POST",
+			dataType : 'html',
+			data: {
+				action: 'patreon_wordpress_toggle_option',
+				toggle_id: toggle_id,
+			}
+		});		
+		
+	});
 });

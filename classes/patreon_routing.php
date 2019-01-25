@@ -13,7 +13,6 @@ class Patreon_Routing {
 		add_filter( 'query_vars', array( $this, 'query_vars' ) );
 		add_action( 'parse_request', array( $this, 'parse_request' ) );
 		add_action( 'init', array( $this, 'force_rewrite_rules' ) );
-		add_action( 'init', array( $this,'set_patreon_nonce' ), 1);
 		
 	}
 
@@ -65,6 +64,8 @@ class Patreon_Routing {
 		array_push( $public_query_vars, 'patreon-flow' );
 		array_push( $public_query_vars, 'patreon-unlock-post' );
 		array_push( $public_query_vars, 'patreon-unlock-image' );
+		array_push( $public_query_vars, 'patreon-direct-unlock' );
+		array_push( $public_query_vars, 'patreon-post-id' );
 		array_push( $public_query_vars, 'patreon-login' );
 		array_push( $public_query_vars, 'patreon-final-redirect' );
 		array_push( $public_query_vars, 'code' );
@@ -74,21 +75,15 @@ class Patreon_Routing {
 		
 	}
 
-	function set_patreon_nonce() {
-		
-		if( isset( $_COOKIE['patreon_nonce'] ) == false ) {
-			
-			$nonce = md5( bin2hex( openssl_random_pseudo_bytes( 32 ) . md5( time() ) . openssl_random_pseudo_bytes( 32 ) ) );
-			setcookie( 'patreon_nonce', $nonce, 0, COOKIEPATH, COOKIE_DOMAIN );
-			$_COOKIE['patreon_nonce'] = $nonce;
-			
- 		}
-		
-	}
-
 	function parse_request( &$wp ) {
 
 		if ( strpos( $_SERVER['REQUEST_URI'],'/patreon-flow/' ) !== false ) {
+			
+			// First slap the noindex header so search engines wont index this page:
+			header( 'X-Robots-Tag: noindex, nofollow' );
+			 
+			// Make sure browsers dont cache this
+			header( 'cache-control: no-cache, must-revalidate, max-age=0' );			
 			
 			if( array_key_exists( 'patreon-login', $wp->query_vars ) ) {
 				
@@ -104,21 +99,80 @@ class Patreon_Routing {
 				$state = array(
 					'final_redirect_uri' => $final_redirect,
 				);
+				
+				// Below filter vars and the following filter allows plugin devs to acquire/filter info about Patron/user + content before going to Patreon flow
+				
+				$filter_args = array(
+					'state' => $state,
+					'user' => wp_get_current_user(),
+				);
+				
+				do_action( 'patreon_do_action_before_patreon_login', $filter_args );				
 			
 				$login_url = Patreon_Frontend::patreonMakeLoginLink( false, $state );
 
 				wp_redirect( $login_url );
 				exit;
+			
+			}
+			
+			if( array_key_exists( 'patreon-direct-unlock', $wp->query_vars ) ) {
 				
+				$final_redirect = wp_login_url();
+				
+				if( isset( $wp->query_vars['patreon-direct-unlock'] ) ) {
+					
+					if( !( isset($GLOBALS['patreon_enable_direct_unlocks']) AND $GLOBALS['patreon_enable_direct_unlocks'] )
+					) {
+						
+						// No locking level set for this content or the site. No point in locking. Redirect to post.
+						$final_redirect = add_query_arg( 'patreon_message', 'patreon_direct_unlocks_not_turned_on', $final_redirect );
+						wp_redirect( $final_redirect );
+						
+						exit;	
+					}					
+					
+					$patreon_level = $wp->query_vars['patreon-direct-unlock'];
+					$redirect = base64_decode( urldecode( $wp->query_vars['patreon-redirect'] ) );
+					
+					if( !$patreon_level OR $patreon_level == '' OR $patreon_level == 0 ) {
+						$patreon_level = 1;
+					}
+					
+					$client_id = get_option( 'patreon-client-id', false );
+				
+					if( !$client_id ) {
+						
+						// No client id, no point in being here. Make it go with an error.
+						
+						$final_redirect = add_query_arg( 'patreon_message', 'patreon_cant_login_api_error_credentials', $final_redirect );
+						
+						wp_redirect( $final_redirect );
+						exit;
+						
+					}
+					
+					$post = false;
+					
+					// If post id set, get the post 
+					if( isset( $wp->query_vars['patreon-post-id'] ) ) {
+						$post = get_post( $wp->query_vars['patreon-post-id'] );
+					}
+					
+					$link_interface_item         = 'direct_unlock_button';
+					$state['final_redirect_uri'] = $redirect;	
+					$send_pledge_level           = $patreon_level * 100;
+					
+					$flow_link = Patreon_Frontend::MakeUniversalFlowLink( $send_pledge_level, $state, $client_id, $post, array('link_interface_item' => $link_interface_item ) );
+
+					wp_redirect( $flow_link );
+					exit;
+					
+				}
+			
 			}
 			
 			if( array_key_exists( 'patreon-unlock-post', $wp->query_vars ) ) {
-				
-				// First slap the noindex header so search engines wont index this page:
-				header( 'X-Robots-Tag: noindex, nofollow' );
-				 
-				// Make sure browsers dont cache this
-				header( 'cache-control: no-cache, must-revalidate, max-age=0' );
 				
 				// We have a login/flow request, Get the post id
 				
@@ -189,7 +243,9 @@ class Patreon_Routing {
 						
 					}
 		
-					if( $patreon_level == 0 ) {
+					if( $patreon_level == 0  
+						AND !( isset($GLOBALS['patreon_enable_direct_unlocks']) AND $GLOBALS['patreon_enable_direct_unlocks'] )
+					) {
 						
 						// No locking level set for this content or the site. No point in locking. Redirect to post.
 						$final_redirect = add_query_arg( 'patreon_message', 'patreon_no_locking_level_set_for_this_post', $final_redirect );
@@ -215,7 +271,21 @@ class Patreon_Routing {
 
 					$send_pledge_level = $patreon_level * 100;
 					
-					$flow_link = Patreon_Frontend::MakeUniversalFlowLink( $send_pledge_level, $state, $client_id, false, array('link_interface_item' => $link_interface_item ) );
+					// Below filter vars and the following filter allows plugin devs to acquire/filter info about Patron/user + content before going to Patreon flow
+					
+					$filter_args = array(
+						'link_interface_item' => $link_interface_item, 
+						'post' => $post,
+						'post_level' => $post_level,
+						'patreon_level' => $patreon_level,
+						'state' => $state,
+						'state' => $state,
+						'user' => wp_get_current_user(),
+					);
+					
+					do_action( 'patreon_do_action_before_universal_flow', $filter_args );
+					
+					$flow_link = Patreon_Frontend::MakeUniversalFlowLink( $send_pledge_level, $state, $client_id, $post, array('link_interface_item' => $link_interface_item ) );
 				
 					wp_redirect( $flow_link );
 					exit;
@@ -225,18 +295,25 @@ class Patreon_Routing {
 			}
 			
 			// Catch all
-			wp_redirect( home_url() );
+			$redirect = add_query_arg( 'patreon_message', 'no_patreon_action_provided_for_flow', wp_login_url() );
+			wp_redirect( $redirect );
 			exit;
 			
 		}
 		if ( strpos( $_SERVER['REQUEST_URI'], '/patreon-authorization/' ) !== false ) {
+
+			// First slap the noindex header so search engines wont index this page:
+			header( 'X-Robots-Tag: noindex, nofollow' );
+			 
+			// Make sure browsers dont cache this
+			header( 'cache-control: no-cache, must-revalidate, max-age=0' );			
 	
 			if( array_key_exists( 'code', $wp->query_vars ) ) {
 				
 				// Get state vars if they exist
 	
 				if( $wp->query_vars['state'] !='' ) {
-					$state = unserialize( base64_decode( urldecode( $wp->query_vars['state'] ) ) );
+					$state = json_decode( base64_decode( urldecode( $wp->query_vars['state'] ) ), true );
 				}
 
 				$redirect = false;
@@ -246,18 +323,9 @@ class Patreon_Routing {
 				if( $state['final_redirect_uri'] != '' ) {
 					$redirect = $state['final_redirect_uri'];
 				}		
-				
+			
 				$redirect = apply_filters( 'ptrn/redirect', $redirect );		
-	
-				if( $state['patreon_nonce'] != $_COOKIE['patreon_nonce'] ) {
 					
-					// Nonces do not match. Abort, show message.
-					$redirect = add_query_arg( 'patreon_message', 'patreon_nonces_dont_match', $redirect );
-					wp_redirect( $redirect );
-					exit;
-					
-				}
-				
 				if( get_option( 'patreon-client-id', false ) == false || get_option( 'patreon-client-secret', false ) == false ) {
 
 					/* redirect to homepage because of oauth client_id or secure_key error  */
@@ -295,13 +363,13 @@ class Patreon_Routing {
 					$api_client = new Patreon_API( $tokens['access_token'] );
 					
 					$user_response = $api_client->fetch_user();
-
+					
 					if( apply_filters( 'ptrn/force_strict_oauth', get_option( 'patreon-enable-strict-oauth', false ) ) ) {
 						$user = Patreon_Login::updateLoggedInUserForStrictoAuth( $user_response, $tokens, $redirect );
 					} else {
 						$user = Patreon_Login::createOrLogInUserFromPatreon( $user_response, $tokens, $redirect );
 					}
-
+					
 					//shouldn't get here
 					$redirect = add_query_arg( 'patreon_message', 'patreon_weird_redirection_at_login', $redirect );
 					
@@ -312,7 +380,8 @@ class Patreon_Routing {
 				
 			} else {
 				
-				wp_redirect( home_url() );
+				$redirect = add_query_arg( 'patreon_message', 'no_code_receved_from_patreon', wp_login_url() );
+				wp_redirect( $redirect );
 				exit;
 				
 			}
